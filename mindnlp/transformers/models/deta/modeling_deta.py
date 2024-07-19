@@ -656,16 +656,8 @@ class DetaMultiscaleDeformableAttention(nn.Cell):
         self._reset_parameters()
 
     def _reset_parameters(self):
-        self.sampling_offsets.weight.set_data(
-            mindspore.Parameter(
-                initializer(
-                    "zeros",
-                    self.sampling_offsets.weight.shape,
-                    self.sampling_offsets.weight.dtype,
-                )
-            )
-        )
-
+        self.sampling_offsets.weight.data.set_data(
+            Parameter(initializer('zeros', self.sampling_offsets.weight.data.shape, self.sampling_offsets.weight.data.dtype)))
         default_dtype = get_default_dtype()
 
         # thetas = ops.arange(self.n_heads, dtype=mindspore.int64).to(default_dtype) * (
@@ -684,14 +676,7 @@ class DetaMultiscaleDeformableAttention(nn.Cell):
             grid_init[:, :, i, :] *= i + 1
         self.sampling_offsets.bias = mindspore.Parameter(grid_init.view(-1))
         self.attention_weights.weight.set_data(
-            mindspore.Parameter(
-                initializer(
-                    Constant(0.0),
-                    self.attention_weights.weight.shape,
-                    self.attention_weights.weight.dtype,
-                )
-            )
-        )
+            Parameter(initializer('zeros', self.attention_weights.weight.shape, self.attention_weights.weight.dtype)))
         self.attention_weights.bias.set_data(
             mindspore.Parameter(
                 initializer(
@@ -1967,7 +1952,9 @@ class DetaModel(DetaPreTrainedModel):
 
 class DetaForObjectDetection(DetaPreTrainedModel):
     # When using clones, all layers > 0 will be clones, but layer 0 *is* required
-    _keys_to_ignore_on_load_missing = ["bbox_embed\.[1-9]\d*", "class_embed\.[1-9]\d*"]
+    _tied_weights_keys = [r"bbox_embed\.\d+", r"class_embed\.\d+"]
+    # We can't initialize the model on meta device as some weights are modified during the initialization
+    _no_split_modules = None
 
     # Copied from transformers.models.deformable_detr.modeling_deformable_detr.DeformableDetrForObjectDetection.__init__ with DeformableDetr->Deta
     def __init__(self, config: DetaConfig):
@@ -1975,60 +1962,38 @@ class DetaForObjectDetection(DetaPreTrainedModel):
 
         # Deformable DETR encoder-decoder model
         self.model = DetaModel(config)
-
         # Detection heads on top
         self.class_embed = nn.Dense(config.d_model, config.num_labels)
         self.bbox_embed = DetaMLPPredictionHead(
-            input_dim=config.d_model, hidden_dim=config.d_model, output_dim=4, num_layers=3
+            input_dim=config.d_model,
+            hidden_dim=config.d_model,
+            output_dim=4,
+            num_layers=3,
         )
-
         prior_prob = 0.01
         bias_value = -math.log((1 - prior_prob) / prior_prob)
-        self.class_embed.bias.set_data(
+        self.class_embed.bias.data.set_data(
             mindspore.Parameter(ops.ones(config.num_labels) * bias_value)
         )
-        self.bbox_embed.layers[-1].weight.set_data(
-            mindspore.Parameter(
-                initializer(
-                    Constant(value=0),
-                    self.bbox_embed.layers[-1].weight.shape,
-                    self.bbox_embed.layers[-1].weight.dtype,
-                )
-            )
-        )
-        self.bbox_embed.layers[-1].bias.set_data(
-            mindspore.Parameter(
-                initializer(
-                    Constant(value=0),
-                    self.bbox_embed.layers[-1].bias.shape,
-                    self.bbox_embed.layers[-1].bias.dtype,
-                )
-            )
-        )
+        self.bbox_embed.layers[-1].weight.data.set_data(
+            Parameter(initializer('zeros', self.bbox_embed.layers[-1].weight.data.shape, self.bbox_embed.layers[-1].weight.data.dtype)))
+        self.bbox_embed.layers[-1].bias.data.set_data(
+            Parameter(initializer('zeros', self.bbox_embed.layers[-1].bias.data.shape, self.bbox_embed.layers[-1].bias.data.dtype)))
         # if two-stage, the last class_embed and bbox_embed is for region proposal generation
-        num_pred = (config.decoder_layers + 1) if config.two_stage else config.decoder_layers
+        num_pred = ((config.decoder_layers + 1) if config.two_stage else config.decoder_layers)
         if config.with_box_refine:
             self.class_embed = _get_clones(self.class_embed, num_pred)
             self.bbox_embed = _get_clones(self.bbox_embed, num_pred)
             self.bbox_embed[0].layers[-1].bias.data[2:] = mindspore.Parameter(
-                initializer(
-                    Constant(-2.0),
-                    self.bbox_embed[0].layers[-1].bias.data[2:].shape,
-                    self.bbox_embed[0].layers[-1].bias.data[2:].dtype,
-                )
-            )
-
+                initializer(Constant(-2.0),self.bbox_embed[0].layers[-1].bias.data[2:].shape,
+                    self.bbox_embed[0].layers[-1].bias.data[2:].dtype,))
             # hack implementation for iterative bounding box refinement
             self.model.decoder.bbox_embed = self.bbox_embed
         else:
             self.bbox_embed.layers[-1].bias.data[2:] = mindspore.Parameter(
-                initializer(
-                    Constant(-2.0),
+                initializer(Constant(-2.0),
                     self.bbox_embed.layers[-1].bias.data[2:].shape,
-                    self.bbox_embed.layers[-1].bias.data[2:].dtype,
-                )
-            )
-
+                    self.bbox_embed.layers[-1].bias.data[2:].dtype,))
             self.class_embed = nn.CellList([self.class_embed for _ in range(num_pred)])
             self.bbox_embed = nn.CellList([self.bbox_embed for _ in range(num_pred)])
             self.model.decoder.bbox_embed = None
@@ -2042,16 +2007,15 @@ class DetaForObjectDetection(DetaPreTrainedModel):
                         box_embed.layers[-1].bias.data[2:].shape,
                         box_embed.layers[-1].bias.data[2:].dtype,
                     )
-                )
+)
 
         # Initialize weights and apply final processing
         self.post_init()
-
-    # Copied from transformers.models.deformable_detr.modeling_deformable_detr.DeformableDetrForObjectDetection._set_aux_loss
     def _set_aux_loss(self, outputs_class, outputs_coord):
-        # doesn't support dictionary with non-homogeneous values, such
-        # as a dict having both a Tensor and a list.
-        return [{"logits": a, "pred_boxes": b} for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
+        aux_loss = [
+            {"logits": logits, "pred_boxes": pred_boxes}
+            for logits, pred_boxes in zip(outputs_class.swapaxes(0, 1)[:-1], outputs_coord.swapaxes(0, 1)[:-1])]
+        return aux_loss
 
     def construct(
         self,
@@ -2066,47 +2030,6 @@ class DetaForObjectDetection(DetaPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[mindspore.Tensor], DetaObjectDetectionOutput]:
-        r"""
-        labels (`List[Dict]` of len `(batch_size,)`, *optional*):
-            Labels for computing the bipartite matching loss. List of dicts, each dictionary containing at least the
-            following 2 keys: 'class_labels' and 'boxes' (the class labels and bounding boxes of an image in the batch
-            respectively). The class labels themselves should be a `mindspore.Tensor` of len `(number of bounding boxes
-            in the image,)` and the boxes a `mindspore.Tensor` of shape `(number of bounding boxes in the image, 4)`.
-
-        Returns:
-
-        Examples:
-
-        ```python
-        >>> from transformers import AutoImageProcessor, DetaForObjectDetection
-        >>> from PIL import Image
-        >>> import requests
-
-        >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-        >>> image = Image.open(requests.get(url, stream=True).raw)
-
-        >>> image_processor = AutoImageProcessor.from_pretrained("jozhang97/deta-swin-large")
-        >>> model = DetaForObjectDetection.from_pretrained("jozhang97/deta-swin-large")
-
-        >>> inputs = image_processor(images=image, return_tensors="pt")
-        >>> outputs = model(**inputs)
-
-        >>> # convert outputs (bounding boxes and class logits) to COCO API
-        >>> target_sizes = mindspore.Tensor([image.size[::-1]])
-        >>> results = image_processor.post_process_object_detection(outputs, threshold=0.5, target_sizes=target_sizes)[
-        ...     0
-        ... ]
-        >>> for score, label, box in zip(results["scores"], results["labels"], results["boxes"]):
-        ...     box = [round(i, 2) for i in box.tolist()]
-        ...     print(
-        ...         f"Detected {model.config.id2label[label.item()]} with confidence "
-        ...         f"{round(score.item(), 3)} at location {box}"
-        ...     )
-        Detected cat with confidence 0.683 at location [345.85, 23.68, 639.86, 372.83]
-        Detected cat with confidence 0.683 at location [8.8, 52.49, 316.93, 473.45]
-        Detected remote with confidence 0.568 at location [40.02, 73.75, 175.96, 117.33]
-        Detected remote with confidence 0.546 at location [333.68, 77.13, 370.12, 187.51]
-        ```"""
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         # First, sent images through DETR base model to obtain encoder + decoder outputs

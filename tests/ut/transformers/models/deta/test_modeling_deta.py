@@ -14,7 +14,8 @@
 # limitations under the License.
 """ Testing suite for the MindSpore DETA model. """
 
-
+import collections
+import re
 import inspect
 import math
 import unittest
@@ -375,7 +376,7 @@ class DetaModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
 
         for model_class in self.all_model_classes:
             model = model_class(config)
-            signature = inspect.signature(model.forward)
+            signature = inspect.signature(model.construct)
             # signature.parameters is an OrderedDict => so arg_names order is deterministic
             arg_names = [*signature.parameters.keys()]
 
@@ -397,36 +398,54 @@ class DetaModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
 
     def test_initialization(self):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
-
         configs_no_init = _config_zero_init(config)
         for model_class in self.all_model_classes:
             model = model_class(config=configs_no_init)
-            for name, param in model.named_parameters():
+            # Skip the check for the backbone
+            for name, module in model.cells_and_names():
+                if module.__class__.__name__ == "DetaBackboneWithPositionalEncodings":
+                    backbone_params = [
+                        f"{name}.{key}" for key in module.parameters_dict().keys()
+                    ]
+                    break
+
+            for name, param in model.parameters_and_names():
                 if param.requires_grad:
-                    if param.requires_grad:
-                        if (
-                            "level_embed" in name
-                            or "sampling_offsets.bias" in name
-                            or "value_proj" in name
-                            or "output_proj" in name
-                            or "reference_points" in name
-                        ):
-                            continue
+                    if (
+                        "level_embed" in name
+                        or "sampling_offsets.bias" in name
+                        or "value_proj" in name
+                        or "output_proj" in name
+                        or "reference_points" in name
+                        or name in backbone_params
+                    ):
+                        continue
                     self.assertIn(
                         ((param.data.mean() * 1e9).round() / 1e9).item(),
                         [0.0, 1.0],
                         msg=f"Parameter {name} of model {model_class} seems not properly initialized",
                     )
 
+    @unittest.skip("No support for low_cpu_mem_usage=True.")
+    def test_save_load_low_cpu_mem_usage(self):
+        pass
+
+    @unittest.skip("No support for low_cpu_mem_usage=True.")
+    def test_save_load_low_cpu_mem_usage_checkpoints(self):
+        pass
+
+    @unittest.skip("No support for low_cpu_mem_usage=True.")
+    def test_save_load_low_cpu_mem_usage_no_safetensors(self):
+        pass
 
 TOLERANCE = 1e-4
+
 
 
 # We will verify our results on an image of cute cats
 def prepare_img():
     image = Image.open("./tests/fixtures/tests_samples/COCO/000000039769.png")
     return image
-
 
 @require_vision
 @slow

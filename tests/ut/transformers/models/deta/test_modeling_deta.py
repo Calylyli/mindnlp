@@ -437,10 +437,109 @@ class DetaModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
     @unittest.skip("No support for low_cpu_mem_usage=True.")
     def test_save_load_low_cpu_mem_usage_no_safetensors(self):
         pass
+    
+    def test_tied_weights_keys(self):
+        for model_class in self.all_model_classes:
+            # We need to pass model class name to correctly initialize the config.
+            # If we don't pass it, the config for `DetaForObjectDetection`` will be initialized
+            # with `two_stage=False` and the test will fail because for that case `class_embed`
+            # weights are not tied.
+            config, _ = self.model_tester.prepare_config_and_inputs_for_common()
+            config.tie_word_embeddings = True
+
+            model_tied = model_class(config)
+
+            ptrs = collections.defaultdict(list)
+            for name, tensor in model_tied.parameters_dict().items():
+                ptrs[id_tensor_storage(tensor)].append(name)
+
+            # These are all the pointers of shared tensors.
+            tied_params = [names for _, names in ptrs.items() if len(names) > 1]
+
+            tied_weight_keys = (
+                model_tied._tied_weights_keys
+                if model_tied._tied_weights_keys is not None
+                else []
+            )
+            # Detect we get a hit for each key
+            for key in tied_weight_keys:
+                is_tied_key = any(
+                    re.search(key, p) for group in tied_params for p in group
+                )
+                self.assertTrue(
+                    is_tied_key, f"{key} is not a tied weight key for {model_class}."
+                )
+
+            # Removed tied weights found from tied params -> there should only be one left after
+            for key in tied_weight_keys:
+                for i in range(len(tied_params)):
+                    tied_params[i] = [
+                        p for p in tied_params[i] if re.search(key, p) is None
+                    ]
+
+            tied_params = [group for group in tied_params if len(group) > 1]
+            self.assertListEqual(
+                tied_params,
+                [],
+                f"Missing `_tied_weights_keys` for {model_class}: add all of {tied_params} except one.",
+            )
 
 TOLERANCE = 1e-4
 
+@unittest.skip("No attribute storage")
+def storage_ptr(tensor: mindspore.Tensor) -> int:
+    try:
+        return tensor.untyped_storage().data_ptr()
+    except Exception:
+        # Fallback for torch==1.10
+        try:
+            return tensor.storage().data_ptr()
+        except NotImplementedError:
+            # Fallback for meta storage
+            return 0
 
+_float8_e4m3fn = getattr(mindspore, "float8_e4m3fn", None)
+_float8_e5m2 = getattr(mindspore, "float8_e5m2", None)
+_SIZE = {
+    mindspore.int64: 8,
+    mindspore.float32: 4,
+    mindspore.int32: 4,
+    mindspore.bfloat16: 2,
+    mindspore.float16: 2,
+    mindspore.int16: 2,
+    mindspore.uint8: 1,
+    mindspore.int8: 1,
+    mindspore.bool_: 1,
+    mindspore.float64: 8,
+    _float8_e4m3fn: 1,
+    _float8_e5m2: 1,
+}
+
+
+def storage_size(tensor: mindspore.Tensor) -> int:
+    try:
+        return tensor.untyped_storage().nbytes()
+    except AttributeError:
+        # Fallback for torch==1.10
+        try:
+            return tensor.storage().shape * _SIZE[tensor.dtype]
+        except NotImplementedError:
+            # Fallback for meta storage
+            # On torch >=2.0 this is the tensor size
+            return tensor.nelement() * _SIZE[tensor.dtype]
+
+
+def id_tensor_storage(tensor: mindspore.Tensor):
+    """
+    Unique identifier to a tensor storage. Multiple different tensors can share the same underlying storage. For
+    example, "meta" tensors all share the same storage, and thus their identifier will all be equal. This identifier is
+    guaranteed to be unique and constant for this tensor's storage during its lifetime. Two tensor storages with
+    non-overlapping lifetimes may have the same id.
+    """
+
+    unique_id = storage_ptr(tensor)
+
+    return tensor.device, unique_id, storage_size(tensor)
 
 # We will verify our results on an image of cute cats
 def prepare_img():

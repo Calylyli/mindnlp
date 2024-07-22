@@ -12,7 +12,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+<<<<<<< HEAD
 
+=======
+"""Tokenization classes for XLM-prophetnet."""
+>>>>>>> e87736cdff460589efa4fbb35dab7eef1abcbf6c
 import collections
 import os
 from shutil import copyfile
@@ -321,5 +325,9 @@ class XLMProphetNetTokenizer(PreTrainedTokenizer):
             return token_ids_0 + [self.sep_token_id]
         sep = [self.sep_token_id]
         return token_ids_0 + sep + token_ids_1 + sep
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> e87736cdff460589efa4fbb35dab7eef1abcbf6c
 __all__=['XLMProphetNetTokenizer']

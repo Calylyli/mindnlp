@@ -22,7 +22,10 @@ from mindnlp.utils.testing_utils import  slow
 
 if is_mindspore_available():
     import mindspore
+<<<<<<< HEAD
 
+=======
+>>>>>>> e87736cdff460589efa4fbb35dab7eef1abcbf6c
     from mindnlp.transformers import XLMProphetNetForConditionalGeneration, XLMProphetNetTokenizer
 
 
@@ -86,7 +89,11 @@ class XLMProphetNetModelIntegrationTest(unittest.TestCase):
         expected_slice = mindspore.Tensor(
             [[[-6.3986, -8.2391, 12.5189], [-6.3289, -8.0864, 12.6211], [-6.2418, -8.0446, 12.7968]]]
         )
+<<<<<<< HEAD
         self.assertTrue(np.allclose(output_predited_logis[:, :3, :3].asnumpy(), expected_slice.asnumpy(), atol=3e-1))
+=======
+        #self.assertTrue(np.allclose(output_predited_logis[:, :3, :3].asnumpy(), expected_slice.asnumpy(), atol=3e-1))
+>>>>>>> e87736cdff460589efa4fbb35dab7eef1abcbf6c
 
     @slow
     def test_xprophetnet_ntg_inference(self):

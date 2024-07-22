@@ -890,7 +890,10 @@ class XLMProphetNetDecoderLayer(nn.Cell):
 
         return outputs
 
+<<<<<<< HEAD
 # Copied from transformers.models.prophetnet.modeling_prophetnet.ProphetNetEncoder with microsoft/prophetnet-large-uncased->patrickvonplaten/xprophetnet-large-uncased-standalone, ProphetNet->XLMProphetNet, PROPHETNET->XLM_PROPHETNET
+=======
+>>>>>>> e87736cdff460589efa4fbb35dab7eef1abcbf6c
 class XLMProphetNetEncoder(XLMProphetNetPreTrainedModel):
 
 
@@ -998,7 +1001,10 @@ class XLMProphetNetEncoder(XLMProphetNetPreTrainedModel):
         )
 
 
+<<<<<<< HEAD
 # Copied from transformers.models.prophetnet.modeling_prophetnet.ProphetNetDecoder with microsoft/prophetnet-large-uncased->patrickvonplaten/xprophetnet-large-uncased-standalone, ProphetNet->XLMProphetNet, PROPHETNET->XLM_PROPHETNET,
+=======
+>>>>>>> e87736cdff460589efa4fbb35dab7eef1abcbf6c
 class XLMProphetNetDecoder(XLMProphetNetPreTrainedModel):
 
 
@@ -1305,8 +1311,11 @@ class XLMProphetNetDecoder(XLMProphetNetPreTrainedModel):
             extended_predict_attention_mask = extended_predict_causal_mask
         return extended_predict_attention_mask.to(hidden_states.dtype)
 
+<<<<<<< HEAD
 
 # Copied from transformers.models.prophetnet.modeling_prophetnet.ProphetNetModel with microsoft/prophetnet-large-uncased->patrickvonplaten/xprophetnet-large-uncased-standalone, ProphetNet->XLMProphetNet, PROPHETNET->XLM_PROPHETNET
+=======
+>>>>>>> e87736cdff460589efa4fbb35dab7eef1abcbf6c
 class XLMProphetNetModel(XLMProphetNetPreTrainedModel):
     _tied_weights_keys = ["encoder.word_embeddings.weight", "decoder.word_embeddings.weight"]
 
@@ -1414,7 +1423,10 @@ class XLMProphetNetModel(XLMProphetNetPreTrainedModel):
             encoder_attentions=encoder_outputs.attentions,
         )
 
+<<<<<<< HEAD
 # Copied from transformers.models.prophetnet.modeling_prophetnet.ProphetNetForConditionalGeneration with microsoft/prophetnet-large-uncased->patrickvonplaten/xprophetnet-large-uncased-standalone, ProphetNet->XLMProphetNet, PROPHETNET->XLM_PROPHETNET
+=======
+>>>>>>> e87736cdff460589efa4fbb35dab7eef1abcbf6c
 class XLMProphetNetForConditionalGeneration(XLMProphetNetPreTrainedModel):
     _tied_weights_keys = ["encoder.word_embeddings.weight", "decoder.word_embeddings.weight", "lm_head.weight"]
 
@@ -1494,10 +1506,13 @@ class XLMProphetNetForConditionalGeneration(XLMProphetNetPreTrainedModel):
         logits = predict_logits[:, 0]
         logits_ngram = predict_logits[:, 1:] if self.config.ngram > 1 else None
 
+<<<<<<< HEAD
         # To use .view in loss computation, make sure that logits is contiguous.
         if not logits.is_contiguous():
             logits = logits
 
+=======
+>>>>>>> e87736cdff460589efa4fbb35dab7eef1abcbf6c
         loss = None
         if labels is not None:
             loss = self._compute_loss(predict_logits, labels)
@@ -1533,7 +1548,10 @@ class XLMProphetNetForConditionalGeneration(XLMProphetNetPreTrainedModel):
         lprobs = ops.log_softmax(
             logits.view(-1, logits.shape[-1]),
             axis=-1,
+<<<<<<< HEAD
             dtype=mindspore.float32,
+=======
+>>>>>>> e87736cdff460589efa4fbb35dab7eef1abcbf6c
         )
 
         loss = ops.nll_loss(lprobs, expend_targets.view(-1), reduction="mean")
@@ -1599,7 +1617,10 @@ class XLMProphetNetForConditionalGeneration(XLMProphetNetPreTrainedModel):
     def get_decoder(self):
         return self.prophetnet.decoder
 
+<<<<<<< HEAD
 # Copied from transformers.models.prophetnet.modeling_prophetnet.ProphetNetForCausalLM with microsoft/prophetnet-large-uncased->patrickvonplaten/xprophetnet-large-uncased-standalone, ProphetNet->XLMProphetNet, PROPHETNET->XLM_PROPHETNET
+=======
+>>>>>>> e87736cdff460589efa4fbb35dab7eef1abcbf6c
 class XLMProphetNetForCausalLM(XLMProphetNetPreTrainedModel):
     _tied_weights_keys = [
         "prophetnet.word_embeddings.weight",
@@ -1720,7 +1741,10 @@ class XLMProphetNetForCausalLM(XLMProphetNetPreTrainedModel):
         lprobs = ops.log_softmax(
             logits.view(-1, logits.shape[-1]),
             axis=-1,
+<<<<<<< HEAD
             dtype=mindspore.float32,
+=======
+>>>>>>> e87736cdff460589efa4fbb35dab7eef1abcbf6c
         )
 
         loss = ops.nll_loss(lprobs, expend_targets.view(-1), reduction="mean")

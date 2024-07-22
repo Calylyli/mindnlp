@@ -23,4 +23,8 @@ from .tokenization_xlm_prophetnet import *
 __all__ = []
 __all__.extend(modeling_xlm_prophetnet.__all__)
 __all__.extend(configuration_xlm_prophetnet.__all__)
+<<<<<<< HEAD
 __all__.extend(tokenization_xlm_prophetnet.__all__)
+=======
+__all__.extend(tokenization_xlm_prophetnet.__all__)
+>>>>>>> e87736cdff460589efa4fbb35dab7eef1abcbf6c

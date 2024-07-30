@@ -38,7 +38,6 @@ from mindnlp.configs import PT_WEIGHTS_NAME, WEIGHTS_NAME, WEIGHTS_INDEX_NAME, P
     SAFE_WEIGHTS_NAME, SAFE_WEIGHTS_INDEX_NAME
 from mindnlp.utils.download import is_remote_url, download_url, cached_file, get_checkpoint_shard_files
 from mindnlp.utils import convert_file_size_to_int, logging, ModelOutput, is_safetensors_available
-from mindnlp._legacy.functional import arange
 from mindnlp.utils.serialization import load, safe_save_file
 
 from .generation import GenerationMixin
@@ -109,7 +108,6 @@ def set_initialized_submodules(model: nn.Module, state_dict_keys):
             module._is_initialized = True
         else:
             not_initialized_submodules[module_name] = module
-
     return not_initialized_submodules
 
 
@@ -128,7 +126,7 @@ class CellUtilMixin:
     def create_extended_attention_mask_for_decoder(input_shape, attention_mask):
         """create_extended_attention_mask_for_decoder"""
         batch_size, seq_length = input_shape
-        seq_ids = arange(seq_length)
+        seq_ids = ops.arange(seq_length)
         causal_mask = ops.tile((seq_ids[None, None, :]).astype(mindspore.int32),\
          (batch_size, seq_length, 1)) <= seq_ids[None, :, None] # mindspore 2.0
         # causal_mask = Tensor(np.tile(seq_ids[None, None, :].asnumpy(), (batch_size, seq_length, 1))) \
@@ -140,7 +138,7 @@ class CellUtilMixin:
             prefix_seq_len = attention_mask.shape[1] - causal_mask.shape[1]
             causal_mask = ops.concat(
                 [
-                    ops.ones((batch_size, seq_length, prefix_seq_len), dtype=causal_mask.dtype),
+                    ops.ones(batch_size, seq_length, prefix_seq_len, dtype=causal_mask.dtype),
                     causal_mask,
                 ],
                 dim=-1,
@@ -597,7 +595,7 @@ class PreTrainedModel(nn.Module, CellUtilMixin, GenerationMixin, PeftAdapterMixi
                 else:
                     new_bias = output_embeddings.bias[:output_embeddings.weight.shape[0]]
                 new_bias = Parameter(new_bias, name=output_embeddings.bias.name, requires_grad=output_embeddings.bias.requires_grad)
-                replace_references(output_embeddings.bias, new_bias)
+                output_embeddings.bias = new_bias
 
         if hasattr(output_embeddings, "out_channels") and hasattr(input_embeddings, "vocab_size"):
             output_embeddings.out_channels = input_embeddings.vocab_size
@@ -622,9 +620,17 @@ class PreTrainedModel(nn.Module, CellUtilMixin, GenerationMixin, PeftAdapterMixi
         model_embeds = self._resize_token_embeddings(new_num_tokens, pad_to_multiple_of)
         if new_num_tokens is None and pad_to_multiple_of is None:
             return model_embeds
+
+        # Since we are basically resuing the same old embeddings with new weight values, gathering is required
+        vocab_size = model_embeds.weight.shape[0]
+
         # Update base model and current model config
-        self.config.vocab_size = model_embeds.weight.shape[0]
-        self.vocab_size = model_embeds.weight.shape[0]
+        if hasattr(self.config, "text_config"):
+            self.config.text_config.vocab_size = vocab_size
+        else:
+            self.config.vocab_size = vocab_size
+        self.vocab_size = vocab_size
+
         # Tie weights again if needed
         self.tie_weights()
 
@@ -650,7 +656,7 @@ class PreTrainedModel(nn.Module, CellUtilMixin, GenerationMixin, PeftAdapterMixi
         new_embeddings = self._get_resized_embeddings(old_embeddings, new_num_tokens, pad_to_multiple_of)
 
         self.set_input_embeddings(new_embeddings)
-        self.get_input_embeddings().weight.data_sync(True)
+        # self.get_input_embeddings().weight.data_sync(True)
         # Update new_num_tokens with the actual size of new_embeddings
         if pad_to_multiple_of is not None:
             new_num_tokens = new_embeddings.weight.shape[0]
@@ -1210,6 +1216,8 @@ class PreTrainedModel(nn.Module, CellUtilMixin, GenerationMixin, PeftAdapterMixi
                             new_param.name = param.name
                             new_param.requires_grad = param.requires_grad
                             replace_references(param, new_param)
+                        elif isinstance(param, Tensor):
+                            param.assign_value(new_param)
                         else:
                             replace_references(param, Parameter(new_param, requires_grad=param.requires_grad))
                     else:
@@ -1367,7 +1375,8 @@ class PreTrainedModel(nn.Module, CellUtilMixin, GenerationMixin, PeftAdapterMixi
             return
 
         # Check only the first and last input IDs to reduce overhead.
-        if self.config.pad_token_id in input_ids[:, [-1, 0]]:
+        # if self.config.pad_token_id in input_ids[:, [-1, 0]]:
+        if ops.contains(input_ids[:, [-1, 0]], self.config.pad_token_id):
             warn_string = (
                 "We strongly recommend passing in an `attention_mask` since your input_ids may be padded."
             )
@@ -1731,7 +1740,7 @@ class PoolerStartLogits(nn.Module):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, 1)
 
-    def construct(
+    def forward(
         self, hidden_states: mindspore.Tensor, p_mask: Optional[mindspore.Tensor] = None
     ) -> mindspore.Tensor:
         """
@@ -1788,7 +1797,7 @@ class PoolerEndLogits(nn.Module):
         self.LayerNorm = nn.LayerNorm([config.hidden_size], eps=config.layer_norm_eps)
         self.dense_1 = nn.Linear(config.hidden_size, 1)
 
-    def construct(
+    def forward(
         self,
         hidden_states: mindspore.Tensor,
         start_states: Optional[mindspore.Tensor] = None,
@@ -1870,7 +1879,7 @@ class PoolerAnswerClass(nn.Module):
         self.activation = nn.Tanh()
         self.dense_1 = nn.Linear(config.hidden_size, 1, bias=False)
 
-    def construct(
+    def forward(
         self,
         hidden_states: mindspore.Tensor,
         start_states: Optional[mindspore.Tensor] = None,
@@ -1980,7 +1989,7 @@ class SQuADHead(nn.Module):
         self.end_logits = PoolerEndLogits(config)
         self.answer_class = PoolerAnswerClass(config)
 
-    def construct(
+    def forward(
         self,
         hidden_states: mindspore.Tensor,
         start_positions: Optional[mindspore.Tensor] = None,
@@ -2022,14 +2031,14 @@ class SQuADHead(nn.Module):
             # during training, compute the end logits based on the ground truth of the start position
             end_logits = self.end_logits(hidden_states, start_positions=start_positions, p_mask=p_mask)
 
-            start_loss = ops.cross_entropy(start_logits, start_positions)
-            end_loss = ops.cross_entropy(end_logits, end_positions)
+            start_loss = F.cross_entropy(start_logits, start_positions)
+            end_loss = F.cross_entropy(end_logits, end_positions)
             total_loss = (start_loss + end_loss) / 2
 
             if cls_index is not None and is_impossible is not None:
                 # Predict answerability from the representation of CLS and START
                 cls_logits = self.answer_class(hidden_states, start_positions=start_positions, cls_index=cls_index)
-                cls_loss = ops.binary_cross_entropy_with_logits(cls_logits, is_impossible)
+                cls_loss = F.binary_cross_entropy_with_logits(cls_logits, is_impossible)
 
                 # note(zhiliny): by default multiply the loss by 0.5 so that the scale is comparable to start_loss and end_loss
                 total_loss += cls_loss * 0.5
@@ -2075,38 +2084,39 @@ class SQuADHead(nn.Module):
 
 
 class SequenceSummary(nn.Module):
+    r"""
+    Compute a single vector summary of a sequence hidden states.
+
+    Args:
+        config ([`PretrainedConfig`]):
+            The config used by the model. Relevant arguments in the config class of the model are (refer to the actual
+            config class of your model for the default values it uses):
+
+            - **summary_type** (`str`) -- The method to use to make this summary. Accepted values are:
+
+                - `"last"` -- Take the last token hidden state (like XLNet)
+                - `"first"` -- Take the first token hidden state (like Bert)
+                - `"mean"` -- Take the mean of all tokens hidden states
+                - `"cls_index"` -- Supply a Tensor of classification token position (GPT/GPT-2)
+                - `"attn"` -- Not implemented now, use multi-head attention
+
+            - **summary_use_proj** (`bool`) -- Add a projection after the vector extraction.
+            - **summary_proj_to_labels** (`bool`) -- If `True`, the projection outputs to `config.num_labels` classes
+              (otherwise to `config.hidden_size`).
+            - **summary_activation** (`Optional[str]`) -- Set to `"tanh"` to add a tanh activation to the output,
+              another string or `None` will add no activation.
+            - **summary_first_dropout** (`float`) -- Optional dropout probability before the projection and activation.
+            - **summary_last_dropout** (`float`)-- Optional dropout probability after the projection and activation.
     """
-    GPTDoubleHeadsModel and GPT2DoubleHeadsModel class that self.multiple_choice_head
-    """
-    def __init__(self, config):
-        """
-        Initialize the SequenceSummary class.
 
-        Args:
-            self: An instance of the SequenceSummary class.
-            config: The configuration object containing various parameters for sequence summarization.
-
-        Returns:
-            None.
-
-        Raises:
-            NotImplementedError: If the 'summary_type' attribute in the config is set to 'attn'.
-
-        This method initializes the SequenceSummary instance with the provided configuration.
-        It sets the 'summary_type' attribute to the value obtained from the config, defaulting to 'last' if not specified.
-        If 'summary_type' is 'attn', it raises a NotImplementedError.
-        The method then initializes the 'summary' attribute as an nn.Identity() object and checks
-        if 'summary_use_proj' is specified in the config and is set to True.
-        If so, it creates a Dense layer for summarization based on the 'summary_proj_to_labels' and 'num_labels' attributes in the config.
-        The activation function for the summarization is determined based on the 'summary_activation' attribute in the config,
-        defaulting to nn.Identity() if not specified.
-        The first and last dropout layers are initialized based on the 'summary_first_dropout' and 'summary_last_dropout' attributes
-        in the config, respectively, using nn.Identity() if not specified.
-        """
+    def __init__(self, config: PretrainedConfig):
         super().__init__()
 
         self.summary_type = getattr(config, "summary_type", "last")
         if self.summary_type == "attn":
+            # We should use a standard multi-head attention module with absolute positional embedding for that.
+            # Cf. https://github.com/zihangdai/xlnet/blob/master/modeling.py#L253-L276
+            # We can probably just use the multi-head attention module of PyTorch >=1.1.0
             raise NotImplementedError
 
         self.summary = nn.Identity()
@@ -2118,83 +2128,59 @@ class SequenceSummary(nn.Module):
             self.summary = nn.Linear(config.hidden_size, num_classes)
 
         activation_string = getattr(config, "summary_activation", None)
-        self.activation = get_activation(activation_string) if activation_string else nn.Identity()
+        self.activation: Callable = get_activation(activation_string) if activation_string else nn.Identity()
 
         self.first_dropout = nn.Identity()
         if hasattr(config, "summary_first_dropout") and config.summary_first_dropout > 0:
-            self.first_dropout = nn.Dropout(p=config.summary_first_dropout)
+            self.first_dropout = nn.Dropout(config.summary_first_dropout)
 
         self.last_dropout = nn.Identity()
         if hasattr(config, "summary_last_dropout") and config.summary_last_dropout > 0:
-            self.last_dropout = nn.Dropout(p=config.summary_last_dropout)
+            self.last_dropout = nn.Dropout(config.summary_last_dropout)
 
-    def construct(self, hidden_states: Tensor, cls_index: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self, hidden_states: mindspore.Tensor, cls_index: Optional[mindspore.Tensor] = None
+    ) -> mindspore.Tensor:
         """
-        Constructs a summary of hidden states based on the specified summary type.
+        Compute a single vector summary of a sequence hidden states.
 
         Args:
-            self (SequenceSummary): The instance of the SequenceSummary class.
-            hidden_states (Tensor): The tensor of hidden states to be summarized.
-            cls_index (Optional[Tensor]): The tensor containing the indices of the CLS tokens.
-                Defaults to None.
+            hidden_states (`mindspore.Tensor` of shape `[batch_size, seq_len, hidden_size]`):
+                The hidden states of the last layer.
+            cls_index (`mindspore.Tensor` of shape `[batch_size]` or `[batch_size, ...]` where ... are optional leading dimensions of `hidden_states`, *optional*):
+                Used if `summary_type == "cls_index"` and takes the last token of the sequence as classification token.
 
         Returns:
-            Tensor: The summarized tensor based on the specified summary type.
-
-        Raises:
-            ValueError: If the summary type is not one of the available options.
-            TypeError: If the input arguments are of incorrect types.
-
-        The method performs the following steps to construct the summary:
-
-        1. If the summary type is 'last', it selects the last hidden state from each input sequence.
-        2. If the summary type is 'first', it selects the first hidden state from each input sequence.
-        3. If the summary type is 'mean', it calculates the mean of all hidden states in each input sequence.
-        4. If the summary type is 'cls_index', it uses the CLS token indices to select the corresponding hidden states.
-           If cls_index is not provided, the last token in each sequence is used as the CLS token index.
-        5. If the summary type is not one of the available options, it returns the original hidden states.
-        6. The resulting hidden states are then passed through a series of dropout, summary, and activation layers.
-        7. Finally, the output tensor is returned.
-
-        Note:
-            - The summary type can be one of the following: 'last', 'first', 'mean', or 'cls_index'.
-            - The cls_index parameter is only used when the summary type is 'cls_index'.
-            - The hidden_states tensor should have shape (batch_size, sequence_length, hidden_size).
-            - The cls_index tensor should have shape (batch_size, 1).
-
-        Example:
-            ```python
-            >>> summary = SequenceSummary()
-            >>> hidden_states = torch.randn(2, 5, 10)
-            >>> cls_index = torch.tensor([[0], [1]])
-            >>> output = summary.construct(hidden_states, cls_index)
-            ```
+            `mindspore.Tensor`: The summary of the sequence hidden states.
         """
         if self.summary_type == "last":
-            output = hidden_states[:, -1, :]
+            output = hidden_states[:, -1]
         elif self.summary_type == "first":
-            output = hidden_states[:, 0, :]
+            output = hidden_states[:, 0]
         elif self.summary_type == "mean":
             output = hidden_states.mean(dim=1)
         elif self.summary_type == "cls_index":
             if cls_index is None:
-                cls_index = ops.fill(
-                    mindspore.int64,
-                    hidden_states[..., :1, :].shape,
+                cls_index = ops.full_like(
+                    hidden_states[..., :1, :],
                     hidden_states.shape[-2] - 1,
+                    dtype=mindspore.int64,
                 )
             else:
-                cls_index = cls_index.expand_dims(-1).expand_dims(-1)
-                cls_index = cls_index.broadcast_to((-1,) * (cls_index.ndim - 1) + (hidden_states.shape[-1],))
-            output = hidden_states.gather_elements(-2, cls_index).squeeze(-2)  # shape (bsz, XX, hidden_size)
-        else:
-            output = hidden_states
+                cls_index = cls_index.unsqueeze(-1).unsqueeze(-1)
+                cls_index = cls_index.broadcast_to((-1,) * (cls_index.dim() - 1) + (hidden_states.shape[-1],))
+            # shape of cls_index: (bsz, XX, 1, hidden_size) where XX are optional leading dim of hidden_states
+            output = ops.gather(hidden_states, -2, cls_index).squeeze(-2)  # shape (bsz, XX, hidden_size)
+        elif self.summary_type == "attn":
+            raise NotImplementedError
 
         output = self.first_dropout(output)
         output = self.summary(output)
         output = self.activation(output)
         output = self.last_dropout(output)
+
         return output
+
 
 def replace_references(old_obj, new_obj, ignore_vars=None):
     """use replace_references instead of Tensor.set_data due to mindspore errors."""

@@ -49,11 +49,15 @@ def gather(input, dim, index):
         return mindspore.mint.gather(input, dim, index)
     return ops.gather_elements(input, dim, index)
 
+def gather_nd(input, indices):
+    return ops.gather_nd(input, indices)
+
 # hsplit
 
 
 # hstack
-
+def hstack(tensors):
+    return ops.hstack(tensors)
 
 # index_add
 
@@ -65,7 +69,10 @@ def gather(input, dim, index):
 
 
 # index_select
-
+def index_select(input, dim, index):
+    if USE_PYBOOST:
+        return mindspore.mint.index_select(input, dim, index)
+    return ops.index_select(input, dim, index)
 
 # masked_select
 
@@ -119,8 +126,7 @@ def select(input, dim, index):
 # scatter
 def scatter(input, dim, index, src):
     if USE_PYBOOST:
-        reduce = mindspore.ops.auto_generate.gen_arg_handler.str_to_enum('Scatter', 'reduce', "none")
-        return mindspore.ops.auto_generate.gen_ops_prim.scatter_op(input, dim, index, src, reduce)
+        return mindspore.ops.auto_generate.gen_ops_prim.scatter_op(input, dim, index, src, 0)
     return ops.tensor_scatter_elements(input, index, src, dim)
 
 # diagonal_scatter
@@ -140,6 +146,10 @@ def scatter_add(input, dim, index, src):
 
 # scatter_reduce
 
+
+# scatter_nd_update
+def scatter_nd_update(input, indices, update):
+    return ops.scatter_nd_update(input, indices, update)
 
 # split
 def split(tensor, split_size_or_sections, dim=0):

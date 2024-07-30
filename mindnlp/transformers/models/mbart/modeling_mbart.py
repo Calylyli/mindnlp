@@ -24,7 +24,7 @@ import numpy as np
 from mindspore import log as logger
 import mindspore
 from mindspore import Tensor
-from mindspore import nn, ops
+from mindnlp.core import nn, ops
 from mindspore.common.initializer import initializer, Normal
 
 from ...activations import ACT2FN
@@ -91,17 +91,17 @@ class MBartLearnedPositionalEmbedding(nn.Embedding):
         self.offset = 2
         super().__init__(num_embeddings + self.offset, embedding_dim)
 
-    def construct(self, input_ids: Tensor, past_key_values_length: int = 0):
+    def forward(self, input_ids: Tensor, past_key_values_length: int = 0):
         """`ids' shape is expected to be [bsz x seqlen]."""
         bsz, seq_len = input_ids.shape[:2]
         positions = ops.arange(
             past_key_values_length, past_key_values_length + seq_len, dtype=mindspore.int64
         ).expand(bsz, -1)
 
-        return super().construct(positions + self.offset)
+        return super().forward(positions + self.offset)
 
 
-class MBartAttention(nn.Cell):
+class MBartAttention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
     def __init__(
             self,
@@ -142,10 +142,10 @@ class MBartAttention(nn.Cell):
         self.scaling = self.head_dim ** -0.5
         self.is_decoder = is_decoder
 
-        self.k_proj = nn.Dense(embed_dim, embed_dim, has_bias=bias)
-        self.v_proj = nn.Dense(embed_dim, embed_dim, has_bias=bias)
-        self.q_proj = nn.Dense(embed_dim, embed_dim, has_bias=bias)
-        self.out_proj = nn.Dense(embed_dim, embed_dim, has_bias=bias)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
 
     def _shape(self, tensor: mindspore.Tensor, seq_len: int, bsz: int):
         """
@@ -168,7 +168,7 @@ class MBartAttention(nn.Cell):
         """
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).swapaxes(1, 2)
 
-    def construct(
+    def forward(
         self,
         hidden_states: mindspore.Tensor,
         key_value_states: Optional[mindspore.Tensor] = None,
@@ -266,7 +266,7 @@ class MBartAttention(nn.Cell):
         else:
             attn_weights_reshaped = None
 
-        attn_probs = ops.dropout(attn_weights, p=self.dropout, training=self.training)
+        attn_probs = F.dropout(attn_weights, p=self.dropout, training=self.training)
 
         attn_output = ops.bmm(attn_probs, value_states)
 
@@ -288,7 +288,7 @@ class MBartAttention(nn.Cell):
         return attn_output, attn_weights_reshaped, past_key_value
 
 
-class MBartEncoderLayer(nn.Cell):
+class MBartEncoderLayer(nn.Module):
     """MBartEncoderLayer"""
     def __init__(self, config: MBartConfig):
         """
@@ -315,15 +315,15 @@ class MBartEncoderLayer(nn.Cell):
             num_heads=config.encoder_attention_heads,
             dropout=config.attention_dropout,
         )
-        self.self_attn_layer_norm = nn.LayerNorm([self.embed_dim], epsilon=1e-5)
+        self.self_attn_layer_norm = nn.LayerNorm([self.embed_dim], eps=1e-5)
         self.dropout = config.dropout
         self.activation_fn = ACT2FN[config.activation_function]
         self.activation_dropout = config.activation_dropout
-        self.fc1 = nn.Dense(self.embed_dim, config.encoder_ffn_dim)
-        self.fc2 = nn.Dense(config.encoder_ffn_dim, self.embed_dim)
-        self.final_layer_norm = nn.LayerNorm([self.embed_dim], epsilon=1e-5)
+        self.fc1 = nn.Linear(self.embed_dim, config.encoder_ffn_dim)
+        self.fc2 = nn.Linear(config.encoder_ffn_dim, self.embed_dim)
+        self.final_layer_norm = nn.LayerNorm([self.embed_dim], eps=1e-5)
 
-    def construct(
+    def forward(
             self,
             hidden_states: Tensor,
             attention_mask: Tensor,
@@ -355,15 +355,15 @@ class MBartEncoderLayer(nn.Cell):
             layer_head_mask=layer_head_mask,
             output_attentions=output_attentions,
         )
-        hidden_states = ops.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = F.dropout(hidden_states, p=self.dropout, training=self.training)
         hidden_states = residual + hidden_states
 
         residual = hidden_states
         hidden_states = self.final_layer_norm(hidden_states)
         hidden_states = self.activation_fn(self.fc1(hidden_states))
-        hidden_states = ops.dropout(hidden_states, p=self.activation_dropout, training=self.training)
+        hidden_states = F.dropout(hidden_states, p=self.activation_dropout, training=self.training)
         hidden_states = self.fc2(hidden_states)
-        hidden_states = ops.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = F.dropout(hidden_states, p=self.dropout, training=self.training)
         hidden_states = residual + hidden_states
 
         if hidden_states.dtype == mindspore.float16 and (
@@ -380,7 +380,7 @@ class MBartEncoderLayer(nn.Cell):
         return outputs
 
 
-class MBartDecoderLayer(nn.Cell):
+class MBartDecoderLayer(nn.Module):
     """MBartDecoderLayer"""
     def __init__(self, config: MBartConfig):
         """
@@ -412,19 +412,19 @@ class MBartDecoderLayer(nn.Cell):
         self.activation_fn = ACT2FN[config.activation_function]
         self.activation_dropout = config.activation_dropout
 
-        self.self_attn_layer_norm = nn.LayerNorm([self.embed_dim], epsilon=1e-5)
+        self.self_attn_layer_norm = nn.LayerNorm([self.embed_dim], eps=1e-5)
         self.encoder_attn = MBartAttention(
             self.embed_dim,
             config.decoder_attention_heads,
             dropout=config.attention_dropout,
             is_decoder=True,
         )
-        self.encoder_attn_layer_norm = nn.LayerNorm([self.embed_dim], epsilon=1e-5)
-        self.fc1 = nn.Dense(self.embed_dim, config.decoder_ffn_dim)
-        self.fc2 = nn.Dense(config.decoder_ffn_dim, self.embed_dim)
-        self.final_layer_norm = nn.LayerNorm([self.embed_dim], epsilon=1e-5)
+        self.encoder_attn_layer_norm = nn.LayerNorm([self.embed_dim], eps=1e-5)
+        self.fc1 = nn.Linear(self.embed_dim, config.decoder_ffn_dim)
+        self.fc2 = nn.Linear(config.decoder_ffn_dim, self.embed_dim)
+        self.final_layer_norm = nn.LayerNorm([self.embed_dim], eps=1e-5)
 
-    def construct(
+    def forward(
             self,
             hidden_states: Tensor,
             attention_mask: Optional[Tensor] = None,
@@ -479,7 +479,7 @@ class MBartDecoderLayer(nn.Cell):
             layer_head_mask=layer_head_mask,
             output_attentions=output_attentions,
         )
-        hidden_states = ops.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = F.dropout(hidden_states, p=self.dropout, training=self.training)
         hidden_states = residual + hidden_states
 
         # Cross-Attention Block
@@ -499,7 +499,7 @@ class MBartDecoderLayer(nn.Cell):
                 past_key_value=cross_attn_past_key_value,
                 output_attentions=output_attentions,
             )
-            hidden_states = ops.dropout(hidden_states, p=self.dropout, training=self.training)
+            hidden_states = F.dropout(hidden_states, p=self.dropout, training=self.training)
             hidden_states = residual + hidden_states
 
             # add cross-attn to positions 3,4 of present_key_value tuple
@@ -509,9 +509,9 @@ class MBartDecoderLayer(nn.Cell):
         residual = hidden_states
         hidden_states = self.final_layer_norm(hidden_states)
         hidden_states = self.activation_fn(self.fc1(hidden_states))
-        hidden_states = ops.dropout(hidden_states, p=self.activation_dropout, training=self.training)
+        hidden_states = F.dropout(hidden_states, p=self.activation_dropout, training=self.training)
         hidden_states = self.fc2(hidden_states)
-        hidden_states = ops.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = F.dropout(hidden_states, p=self.dropout, training=self.training)
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
@@ -525,7 +525,7 @@ class MBartDecoderLayer(nn.Cell):
         return outputs
 
 
-class MBartClassificationHead(nn.Cell):
+class MBartClassificationHead(nn.Module):
     """Head for sentence-level classification tasks."""
     def __init__(
             self,
@@ -551,13 +551,13 @@ class MBartClassificationHead(nn.Cell):
             TypeError: If input_dim, inner_dim, num_classes, or pooler_dropout is not of the correct type.
         """
         super().__init__()
-        self.dense = nn.Dense(input_dim, inner_dim)
+        self.dense = nn.Linear(input_dim, inner_dim)
         self.dropout = nn.Dropout(p=pooler_dropout)
-        self.out_proj = nn.Dense(inner_dim, num_classes)
+        self.out_proj = nn.Linear(inner_dim, num_classes)
 
-    def construct(self, hidden_states: Tensor) -> Tensor:
+    def forward(self, hidden_states: Tensor) -> Tensor:
         """
-        This method constructs the MBartClassificationHead by processing the input hidden_states.
+        This method forwards the MBartClassificationHead by processing the input hidden_states.
 
         Args:
             self (MBartClassificationHead): The instance of the MBartClassificationHead class.
@@ -598,7 +598,7 @@ class MBartPreTrainedModel(PreTrainedModel):
             None.
         """
         std = self.config.init_std
-        if isinstance(cell, nn.Dense):
+        if isinstance(cell, nn.Linear):
             cell.weight.set_data(initializer(Normal(self.config.init_std),
                                                cell.weight.shape, cell.weight.dtype))
             if cell.bias is not None:
@@ -667,7 +667,7 @@ class MBartEncoder(MBartPreTrainedModel):
             config.max_position_embeddings,
             embed_dim,
         )
-        self.layers = nn.CellList([MBartEncoderLayer(config) for _ in range(config.encoder_layers)])
+        self.layers = nn.ModuleList([MBartEncoderLayer(config) for _ in range(config.encoder_layers)])
         self.layernorm_embedding = nn.LayerNorm([embed_dim])
         self.layer_norm = nn.LayerNorm([config.d_model])
 
@@ -675,7 +675,7 @@ class MBartEncoder(MBartPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-    def construct(
+    def forward(
             self,
             input_ids: Tensor = None,
             attention_mask: Optional[Tensor] = None,
@@ -743,7 +743,7 @@ class MBartEncoder(MBartPreTrainedModel):
 
         hidden_states = inputs_embeds + embed_pos
         hidden_states = self.layernorm_embedding(hidden_states)
-        hidden_states = ops.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = F.dropout(hidden_states, p=self.dropout, training=self.training)
 
         # expand attention_mask
         if attention_mask is not None:
@@ -833,9 +833,9 @@ class MBartDecoder(MBartPreTrainedModel):
             config.max_position_embeddings,
             config.d_model,
         )
-        self.layers = nn.CellList([MBartDecoderLayer(config) for _ in range(config.decoder_layers)])
-        self.layernorm_embedding = nn.LayerNorm([config.d_model], epsilon=1e-5)
-        self.layer_norm = nn.LayerNorm([config.d_model], epsilon=1e-5)
+        self.layers = nn.ModuleList([MBartDecoderLayer(config) for _ in range(config.decoder_layers)])
+        self.layernorm_embedding = nn.LayerNorm([config.d_model], eps=1e-5)
+        self.layer_norm = nn.LayerNorm([config.d_model], eps=1e-5)
 
         self.gradient_checkpointing = False
         # Initialize weights and apply final processing
@@ -874,7 +874,7 @@ class MBartDecoder(MBartPreTrainedModel):
         """
         self.embed_tokens = new_embeddings
 
-    def construct(
+    def forward(
             self,
             input_ids: Tensor = None,
             attention_mask: Optional[Tensor] = None,
@@ -890,7 +890,7 @@ class MBartDecoder(MBartPreTrainedModel):
             return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPastAndCrossAttentions]:
         """
-        This method constructs the MBartDecoder model.
+        This method forwards the MBartDecoder model.
 
         Args:
             self: The object instance.
@@ -961,7 +961,7 @@ class MBartDecoder(MBartPreTrainedModel):
         hidden_states = inputs_embeds + positions
         hidden_states = self.layernorm_embedding(hidden_states)
 
-        hidden_states = ops.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = F.dropout(hidden_states, p=self.dropout, training=self.training)
 
         if self.gradient_checkpointing and self.training:
             if use_cache:
@@ -1132,7 +1132,7 @@ class MBartModel(MBartPreTrainedModel):
         """get_decoder"""
         return self.decoder
 
-    def construct(
+    def forward(
             self,
             input_ids: Tensor = None,
             attention_mask: Optional[Tensor] = None,
@@ -1263,7 +1263,7 @@ class MBartForConditionalGeneration(MBartPreTrainedModel):
         super().__init__(config)
         self.model = MBartModel(config)
         self.final_logits_bias = ops.zeros((1, self.model.shared.vocab_size))
-        self.lm_head = nn.Dense(config.d_model, self.model.shared.vocab_size, has_bias=False)
+        self.lm_head = nn.Linear(config.d_model, self.model.shared.vocab_size, bias=False)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1319,7 +1319,7 @@ class MBartForConditionalGeneration(MBartPreTrainedModel):
         """set_output_embeddings"""
         self.lm_head = new_embeddings
 
-    def construct(
+    def forward(
             self,
             input_ids: Tensor = None,
             attention_mask: Optional[Tensor] = None,
@@ -1399,7 +1399,7 @@ class MBartForConditionalGeneration(MBartPreTrainedModel):
 
         masked_lm_loss = None
         if labels is not None:
-            masked_lm_loss = ops.cross_entropy(lm_logits.view(-1, self.config.vocab_size), labels.view(-1))
+            masked_lm_loss = F.cross_entropy(lm_logits.view(-1, self.config.vocab_size), labels.view(-1))
 
         if not return_dict:
             output = (lm_logits,) + outputs[1:]
@@ -1541,7 +1541,7 @@ class MBartForSequenceClassification(MBartPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-    def construct(
+    def forward(
             self,
             input_ids: Tensor = None,
             attention_mask: Optional[Tensor] = None,
@@ -1640,13 +1640,13 @@ class MBartForSequenceClassification(MBartPreTrainedModel):
 
             if self.config.problem_type == "regression":
                 if self.config.num_labels == 1:
-                    loss = ops.mse_loss(logits.squeeze(), labels.squeeze())
+                    loss = F.mse_loss(logits.squeeze(), labels.squeeze())
                 else:
-                    loss = ops.mse_loss(logits, labels)
+                    loss = F.mse_loss(logits, labels)
             elif self.config.problem_type == "single_label_classification":
-                loss = ops.cross_entropy(logits.view(-1, self.config.num_labels), labels.view(-1))
+                loss = F.cross_entropy(logits.view(-1, self.config.num_labels), labels.view(-1))
             elif self.config.problem_type == "multi_label_classification":
-                loss = ops.binary_cross_entropy_with_logits(logits, labels)
+                loss = F.binary_cross_entropy_with_logits(logits, labels)
         if not return_dict:
             output = (logits,) + outputs[1:]
             return ((loss,) + output) if loss is not None else output
@@ -1688,12 +1688,12 @@ class MBartForQuestionAnswering(MBartPreTrainedModel):
         self.num_labels = config.num_labels
 
         self.model = MBartModel(config)
-        self.qa_outputs = nn.Dense(config.hidden_size, config.num_labels)
+        self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
 
         # Initialize weights and apply final processing
         self.post_init()
 
-    def construct(
+    def forward(
             self,
             input_ids: Tensor = None,
             attention_mask: Optional[Tensor] = None,
@@ -1782,8 +1782,8 @@ class MBartForQuestionAnswering(MBartPreTrainedModel):
             start_positions = start_positions.clamp(0, ignored_index)
             end_positions = end_positions.clamp(0, ignored_index)
 
-            start_loss = ops.cross_entropy(start_logits, start_positions, ignore_index=ignored_index)
-            end_loss = ops.cross_entropy(end_logits, end_positions, ignore_index=ignored_index)
+            start_loss = F.cross_entropy(start_logits, start_positions, ignore_index=ignored_index)
+            end_loss = F.cross_entropy(end_logits, end_positions, ignore_index=ignored_index)
             total_loss = (start_loss + end_loss) / 2
 
         if not return_dict:
@@ -1831,7 +1831,7 @@ class MBartDecoderWrapper(MBartPreTrainedModel):
         super().__init__(config)
         self.decoder = MBartDecoder(config)
 
-    def construct(self, *args, **kwargs):
+    def forward(self, *args, **kwargs):
         """
         Constructs a new instance of the MBartDecoderWrapper class.
 
@@ -1845,7 +1845,7 @@ class MBartDecoderWrapper(MBartPreTrainedModel):
             None.
 
         Description:
-            This method is used to construct a new instance of the MBartDecoderWrapper class. It takes no additional
+            This method is used to forward a new instance of the MBartDecoderWrapper class. It takes no additional
             parameters other than self, which is automatically passed to the method. The method initializes
             the instance by calling the decoder method with the provided arguments and keyword arguments.
 
@@ -1854,7 +1854,7 @@ class MBartDecoderWrapper(MBartPreTrainedModel):
         Example:
             ```python
             >>> wrapper = MBartDecoderWrapper()
-            >>> wrapper.construct()
+            >>> wrapper.forward()
             ```
         """
         return self.decoder(*args, **kwargs)
@@ -1891,7 +1891,7 @@ class MBartForCausalLM(MBartPreTrainedModel):
         super().__init__(config)
         self.model = MBartDecoderWrapper(config)
 
-        self.lm_head = nn.Dense(config.hidden_size, config.vocab_size, has_bias=False)
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1920,7 +1920,7 @@ class MBartForCausalLM(MBartPreTrainedModel):
         """get_decoder"""
         return self.model.decoder
 
-    def construct(
+    def forward(
             self,
             input_ids: Tensor = None,
             attention_mask: Optional[Tensor] = None,
@@ -1988,7 +1988,7 @@ class MBartForCausalLM(MBartPreTrainedModel):
 
         loss = None
         if labels is not None:
-            loss = ops.cross_entropy(logits.view(-1, self.config.vocab_size), labels.view(-1))
+            loss = F.cross_entropy(logits.view(-1, self.config.vocab_size), labels.view(-1))
 
         if not return_dict:
             output = (logits,) + outputs[1:]

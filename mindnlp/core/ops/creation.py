@@ -1,5 +1,7 @@
 """creation ops"""
+import numpy as np
 import mindspore
+from mindspore._c_expression import Tensor as CTensor # pylint: disable=no-name-in-module
 from mindspore import ops
 from mindspore.ops._primitive_cache import _get_cache_prim
 from mindnlp.configs import USE_PYBOOST
@@ -11,10 +13,15 @@ def from_numpy(ndarray):
 # frombuffer
 
 # zeros
+_zeros = ops.Zeros()
 def zeros(*size, dtype=None):
+    if isinstance(size[0], (tuple, list)):
+        size = size[0]
     if USE_PYBOOST:
         return mindspore.mint.zeros(size, dtype=dtype)
-    return ops.zeros(size, dtype)
+    if dtype is None:
+        dtype = mindspore.float32
+    return _zeros(size, dtype)
 
 # zeros_like
 def zeros_like(input, *, dtype=None):
@@ -23,10 +30,15 @@ def zeros_like(input, *, dtype=None):
     return ops.zeros_like(input, dtype=dtype)
 
 # ones
+_ones = ops.Ones()
 def ones(*size, dtype=None):
+    if isinstance(size[0], (tuple, list)):
+        size = size[0]
     if USE_PYBOOST:
         return mindspore.mint.ones(size, dtype=dtype)
-    return ops.ones(size, dtype)
+    if dtype is None:
+        dtype = mindspore.float32
+    return _ones(size, dtype)
 
 # ones_like
 def ones_like(input, *, dtype=None):
@@ -46,6 +58,10 @@ def range(start=0, end=None, step=1, dtype=None):
 
 # linspace
 def linspace(start, end, steps, *, dtype=None):
+    if dtype is None:
+        dtype = mindspore.float32
+    if USE_PYBOOST:
+        return mindspore.Tensor(np.linspace(start, end, steps)).to(dtype)
     return ops.linspace(start, end, steps).to(dtype)
 
 # logspace
@@ -59,7 +75,10 @@ def eye(n, m=None, *, dtype=None):
     return ops.eye(n, n, dtype)
 
 # empty
-
+def empty(*size, dtype=None):
+    if dtype is None:
+        dtype = mindspore.float32
+    return CTensor(dtype, size)
 
 # empty_like
 

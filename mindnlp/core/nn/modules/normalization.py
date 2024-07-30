@@ -1,11 +1,10 @@
 """normalization"""
 import numbers
-import mindspore
-from mindspore import ops, Parameter
+from mindspore import Parameter
 from mindspore.common.initializer import initializer
 
-from mindnlp.configs import USE_PYBOOST
 from .module import Module
+from ..functional import group_norm, layer_norm
 
 class LayerNorm(Module):
     r"""Applies Layer Normalization over a mini-batch of inputs as described in
@@ -73,18 +72,8 @@ class LayerNorm(Module):
         self.weight = Parameter(initializer('ones', normalized_shape), 'weight', elementwise_affine)
         self.bias = Parameter(initializer('zeros', normalized_shape), 'bias', elementwise_affine)
 
-        self.layer_norm = ops.LayerNorm(begin_norm_axis=-1,
-                                           begin_params_axis=-1,
-                                           epsilon=self.eps)
-
     def forward(self, input):
-        if USE_PYBOOST:
-            return mindspore.mint.nn.functional.layer_norm(input, self.normalized_shape, self.weight, self.bias, self.eps)
-        return self._forward(input)
-
-    def _forward(self, input):
-        y, _, _ = self.layer_norm(input, self.weight, self.bias)
-        return y
+        return layer_norm(input, self.normalized_shape, self.weight, self.bias, self.eps)
 
     def extra_repr(self):
         return '{normalized_shape}, eps={eps}, ' \
@@ -142,20 +131,7 @@ class GroupNorm(Module):
         self.bias = Parameter(initializer('zeros', (num_channels, )), 'bias', affine)
 
     def forward(self, input):
-        if USE_PYBOOST:
-            return mindspore.mint.nn.functional.group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
-        return self._forward(input)
-
-    def _forward(self, input):
-        batch, channel, height, width = input.shape
-        input = input.reshape(batch, self.num_groups, -1)
-        mean = ops.mean(input, axis=2, keep_dims=True)
-        var = ops.div(ops.sum(ops.square(ops.sub(input, mean)), 2, keepdim=True), (channel * height * width / self.num_groups))
-        std = ops.sqrt(var + self.eps)
-        input = ops.div(ops.sub(input, mean), std)
-        input = input.reshape(batch, channel, height, width)
-        output = ops.add(input * self.weight.reshape(-1, 1, 1), self.bias.reshape(-1, 1, 1))
-        return output
+        return group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
 
     def extra_repr(self):
         return '{num_groups}, {num_channels}, eps={eps}, ' \

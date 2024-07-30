@@ -892,7 +892,7 @@ class GenerationMixin:
             decoder_input_ids_start = decoder_input_ids_start.view(-1, 1)
         else:
             decoder_input_ids_start = (
-                ops.ones((batch_size, 1), dtype=mindspore.int64) * decoder_start_token_id
+                ops.ones(batch_size, 1, dtype=mindspore.int64) * decoder_start_token_id
             )
 
         # no user input -> use decoder_start_token_id as decoder_input_ids
@@ -2367,13 +2367,14 @@ class GenerationMixin:
                 # compute the candidate tokens by the language model and collect their hidden_states
                 # assembles top_k_ids into batch of size k
                 next_model_inputs = self.prepare_inputs_for_generation(top_k_ids.view(-1, 1), **model_kwargs)
-
+                print(type(self))
                 outputs = self(
                     **next_model_inputs,
                     return_dict=True,
                     output_hidden_states=True,
                     output_attentions=output_attentions,
                 )
+                print(type(outputs))
                 # name is different for encoder-decoder and decoder-only models
                 if self.config.is_encoder_decoder:
                     next_hidden = outputs.decoder_hidden_states[-1]
@@ -2383,8 +2384,8 @@ class GenerationMixin:
                     full_hidden_states = outputs.hidden_states
 
                 logits = outputs.logits[:, -1, :]
-
-            context_hidden = last_hidden_states.repeat_interleave(top_k, dim=0)
+            print(last_hidden_states.dtype, next_hidden.dtype)
+            context_hidden = ops.repeat_interleave(last_hidden_states, top_k, dim=0)
 
             # compute the degeneration penalty and re-rank the candidates based on the degeneration penalty and the
             # model confidence. Keeping `selected_idx` on CPU enables multi-device contrastive search and doesn't
@@ -2676,9 +2677,7 @@ class GenerationMixin:
         unfinished_sequences = ops.ones(input_ids.shape[0], dtype=mindspore.int64)
 
         this_peer_finished = False  # used by synced_gpus only
-        import time
         while True:
-            s = time.time()
             # prepare model inputs
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
             # forward pass to get next token
@@ -2746,8 +2745,6 @@ class GenerationMixin:
 
             if this_peer_finished and not synced_gpus:
                 break
-            t = time.time()
-            print(t - s)
         if streamer is not None:
             streamer.end()
 
@@ -2947,9 +2944,7 @@ class GenerationMixin:
 
         this_peer_finished = False  # used by synced_gpus only
         # auto-regressive generation
-        import time
         while True:
-            s = time.time()
             # prepare model inputs
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
             # forward pass to get next token
@@ -3022,8 +3017,6 @@ class GenerationMixin:
 
             if this_peer_finished and not synced_gpus:
                 break
-            t = time.time()
-            print(t - s)
         if streamer is not None:
             streamer.end()
 
@@ -3080,7 +3073,7 @@ class GenerationMixin:
             input_ids (`mindspore.Tensor` of shape `(batch_size, sequence_length)`):
                 The sequence used as a prompt for the generation.
             beam_scorer (`BeamScorer`):
-                An derived instance of [`BeamScorer`] that defines how beam hypotheses are constructed, stored and
+                An derived instance of [`BeamScorer`] that defines how beam hypotheses are forwarded, stored and
                 sorted during generation. For more information, the documentation of [`BeamScorer`] should be read.
             logits_processor (`LogitsProcessorList`, *optional*):
                 An instance of [`LogitsProcessorList`]. List of instances of class derived from [`LogitsProcessor`]
@@ -3394,7 +3387,7 @@ class GenerationMixin:
             input_ids (`mindspore.Tensor` of shape `(batch_size, sequence_length)`):
                 The sequence used as a prompt for the generation.
             beam_scorer (`BeamScorer`):
-                A derived instance of [`BeamScorer`] that defines how beam hypotheses are constructed, stored and
+                A derived instance of [`BeamScorer`] that defines how beam hypotheses are forwarded, stored and
                 sorted during generation. For more information, the documentation of [`BeamScorer`] should be read.
             logits_processor (`LogitsProcessorList`, *optional*):
                 An instance of [`LogitsProcessorList`]. List of instances of class derived from [`LogitsProcessor`]
@@ -3711,7 +3704,7 @@ class GenerationMixin:
             input_ids (`mindspore.Tensor` of shape `(batch_size, sequence_length)`):
                 The sequence used as a prompt for the generation.
             beam_scorer (`BeamScorer`):
-                An derived instance of [`BeamScorer`] that defines how beam hypotheses are constructed, stored and
+                An derived instance of [`BeamScorer`] that defines how beam hypotheses are forwarded, stored and
                 sorted during generation. For more information, the documentation of [`BeamScorer`] should be read.
             logits_processor (`LogitsProcessorList`, *optional*):
                 An instance of [`LogitsProcessorList`]. List of instances of class derived from [`LogitsProcessor`]
@@ -4079,7 +4072,7 @@ class GenerationMixin:
             input_ids (`mindspore.Tensor` of shape `(batch_size, sequence_length)`):
                 The sequence used as a prompt for the generation.
             constrained_beam_scorer (`ConstrainedBeamSearchScorer`):
-                A derived instance of [`BeamScorer`] that defines how beam hypotheses are constructed, stored and
+                A derived instance of [`BeamScorer`] that defines how beam hypotheses are forwarded, stored and
                 sorted during generation, while satisfying a list of positive constraints. For more information, the
                 documentation of [`ConstrainedBeamSearchScorer`] should be read.
             logits_processor (`LogitsProcessorList`, *optional*):

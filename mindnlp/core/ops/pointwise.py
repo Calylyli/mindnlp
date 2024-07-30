@@ -120,7 +120,10 @@ def ceil(input):
     return ops.ceil(input)
 
 # clamp
-
+def clamp(input, min=None, max=None):
+    if USE_PYBOOST:
+        return mindspore.mint.clamp(input, min, max)
+    return ops.clamp(input, min, max)
 
 # clip
 
@@ -178,7 +181,7 @@ def erfinv(input):
 # exp
 def exp(input):
     if USE_PYBOOST:
-        return mindspore.mint.exp
+        return mindspore.mint.exp(input)
     return ops.exp(input)
 
 # exp2
@@ -251,7 +254,8 @@ def log1p(input):
     return ops.log1p(input)
 
 # log2
-
+def log2(input):
+    return ops.log2(input)
 
 # logaddexp
 
@@ -369,7 +373,8 @@ def reciprocal(input):
     return ops.reciprocal(input)
 
 # remainder
-
+def remainder(input, other):
+    return ops.remainder(input, other)
 
 # round
 def round(input):
@@ -413,7 +418,7 @@ def sinh(input):
 def softmax(input, dim=-1, *, dtype=None):
     if USE_PYBOOST:
         return mindspore.mint.softmax(input, dim, dtype=dtype)
-    return ops.softmax(input, dim, dtype)
+    return ops.softmax(input, dim, dtype=dtype)
 
 # sqrt
 def sqrt(input):

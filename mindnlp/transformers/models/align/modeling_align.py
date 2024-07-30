@@ -23,10 +23,11 @@ from functools import partial
 
 import numpy as np
 import mindspore
-from mindspore import ops, Tensor
+from mindspore import Tensor
 from mindspore.common.initializer import initializer, Normal, XavierUniform
 
-from mindnlp.core import nn
+from mindnlp.core import nn, ops
+from mindnlp.core.nn import functional as F
 from mindnlp.utils import (
     ModelOutput,
     logging,
@@ -169,7 +170,7 @@ def contrastive_loss(logits: mindspore.Tensor) -> mindspore.Tensor:
     Raises:
         None.
     '''
-    return ops.cross_entropy(logits, ops.arange(len(logits)), label_smoothing=0.1)
+    return F.cross_entropy(logits, ops.arange(len(logits)), label_smoothing=0.1)
 
 
 def align_loss(similarity: mindspore.Tensor) -> mindspore.Tensor:
@@ -295,7 +296,7 @@ class AlignVisionEmbeddings(nn.Module):
         Raises:
             None.
 
-        This method performs the following steps to construct the aligned vision embeddings:
+        This method performs the following steps to forward the aligned vision embeddings:
 
         1. Padding: The pixel_values tensor is padded to ensure that the dimensions are compatible with the subsequent convolution operation.
         2. Convolution: The padded tensor is convolved using a predefined set of filters to extract features.
@@ -374,7 +375,7 @@ class AlignVisionExpansionLayer(nn.Module):
 
     def forward(self, hidden_states: mindspore.Tensor) -> mindspore.Tensor:
         """
-        This method constructs an expansion layer for align vision.
+        This method forwards an expansion layer for align vision.
 
         Args:
             self: The instance of the AlignVisionExpansionLayer class.
@@ -443,7 +444,7 @@ class AlignVisionDepthwiseLayer(nn.Module):
 
     def forward(self, hidden_states: mindspore.Tensor) -> mindspore.Tensor:
         """
-        This method constructs the depthwise convolutional layer for aligning vision, applying convolution, normalization, and activation operations.
+        This method forwards the depthwise convolutional layer for aligning vision, applying convolution, normalization, and activation operations.
 
         Args:
             self: An instance of the AlignVisionDepthwiseLayer class.
@@ -513,7 +514,7 @@ class AlignVisionSqueezeExciteLayer(nn.Module):
         """
         Constructs the AlignVisionSqueezeExciteLayer.
 
-        This method applies a series of operations to the input hidden_states in order to construct the AlignVisionSqueezeExciteLayer.
+        This method applies a series of operations to the input hidden_states in order to forward the AlignVisionSqueezeExciteLayer.
 
         Args:
             self (AlignVisionSqueezeExciteLayer): An instance of the AlignVisionSqueezeExciteLayer class.
@@ -817,7 +818,7 @@ class AlignVisionEncoder(nn.Module):
             return_dict (Optional[bool]): A boolean flag indicating whether to return the output as a dictionary. Defaults to True.
 
         Returns:
-            BaseModelOutputWithPoolingAndNoAttention: An instance of the BaseModelOutputWithPoolingAndNoAttention class containing the constructed hidden states.
+            BaseModelOutputWithPoolingAndNoAttention: An instance of the BaseModelOutputWithPoolingAndNoAttention class containing the forwarded hidden states.
 
         Raises:
             None.
@@ -876,8 +877,8 @@ class AlignTextEmbeddings(nn.Module):
         self.dropout = nn.Dropout(p=config.hidden_dropout_prob)
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
-        self.register_buffer('position_ids', ops.arange(config.max_position_embeddings).expand((1, -1)))
-        self.register_buffer('token_type_ids', ops.zeros(self.position_ids.shape, dtype=mindspore.int64))
+        self.register_buffer('position_ids', ops.broadcast_to(ops.arange(config.max_position_embeddings), (1, -1)))
+        self.register_buffer('token_type_ids', ops.zeros(*self.position_ids.shape, dtype=mindspore.int64))
 
     def forward(
         self,
@@ -914,16 +915,16 @@ class AlignTextEmbeddings(nn.Module):
         if position_ids is None:
             position_ids = self.position_ids[:, past_key_values_length : seq_length + past_key_values_length]
 
-        # Setting the token_type_ids to the registered buffer in constructor where it is all zeros, which usually occurs
+        # Setting the token_type_ids to the registered buffer in forwardor where it is all zeros, which usually occurs
         # when its auto-generated, registered buffer helps users when tracing the model without passing token_type_ids, solves
         # issue #5664
         if token_type_ids is None:
             if hasattr(self, "token_type_ids"):
                 buffered_token_type_ids = self.token_type_ids[:, :seq_length]
-                buffered_token_type_ids_expanded = buffered_token_type_ids.expand(input_shape[0], seq_length)
+                buffered_token_type_ids_expanded = ops.broadcast_to(buffered_token_type_ids, (input_shape[0], seq_length))
                 token_type_ids = buffered_token_type_ids_expanded
             else:
-                token_type_ids = ops.zeros(input_shape, dtype=mindspore.int64)
+                token_type_ids = ops.zeros(*input_shape, dtype=mindspore.int64)
 
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
@@ -1154,7 +1155,7 @@ class AlignTextSelfAttention(nn.Module):
             attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
-        attention_probs = ops.softmax(attention_scores, axis=-1)
+        attention_probs = ops.softmax(attention_scores, dim=-1)
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
@@ -1249,7 +1250,7 @@ class AlignTextAttention(nn.Module):
     A class representing an align text attention mechanism for neural networks.
 
     This class implements an attention mechanism for aligning text sequences in neural networks.
-    It includes methods for initializing the attention mechanism, pruning attention heads, and constructing the attention output.
+    It includes methods for initializing the attention mechanism, pruning attention heads, and forwarding the attention output.
 
     This class inherits from nn.Module.
 
@@ -1266,7 +1267,7 @@ class AlignTextAttention(nn.Module):
             Initializes the AlignTextAttention instance with the provided configuration and position embedding type.
         prune_heads:
             Prunes the specified attention heads from the self-attention mechanism.
-        construct:
+        forward:
             Constructs the attention output based on the given input tensors and parameters.
 
     Returns:
@@ -1321,7 +1322,7 @@ class AlignTextAttention(nn.Module):
         self.self.query = prune_linear_layer(self.self.query, index)
         self.self.key = prune_linear_layer(self.self.key, index)
         self.self.value = prune_linear_layer(self.self.value, index)
-        self.output.dense = prune_linear_layer(self.output.dense, index, axis=1)
+        self.output.dense = prune_linear_layer(self.output.dense, index, dim=1)
 
         # Update hyper params and store pruned heads
         self.self.num_attention_heads = self.self.num_attention_heads - len(heads)
@@ -1339,7 +1340,7 @@ class AlignTextAttention(nn.Module):
         output_attentions: Optional[bool] = False,
     ) -> Tuple[mindspore.Tensor]:
         """
-        This method constructs attention output based on the input hidden states and optional parameters for the AlignTextAttention class.
+        This method forwards attention output based on the input hidden states and optional parameters for the AlignTextAttention class.
 
         Args:
             self: The instance of the class.
@@ -1378,10 +1379,10 @@ class AlignTextIntermediate(nn.Module):
     Represents a neural network module for aligning text with intermediate processing steps.
 
     This class inherits from nn.Module and provides methods for initializing the module with configuration parameters
-    and constructing the neural network with intermediate processing steps.
+    and forwarding the neural network with intermediate processing steps.
 
     The class includes an initialization method that sets up the dense layers based on the provided configuration.
-    It also constructs the neural network by applying the intermediate activation function to the hidden states after passing through the dense layer.
+    It also forwards the neural network by applying the intermediate activation function to the hidden states after passing through the dense layer.
 
     Attributes:
         dense (nn.Linear): Dense layer for processing hidden states.
@@ -1389,7 +1390,7 @@ class AlignTextIntermediate(nn.Module):
 
     Methods:
         __init__: Initializes the neural network module with the given configuration.
-        construct: Constructs the neural network by processing the hidden states.
+        forward: Constructs the neural network by processing the hidden states.
 
     Note:
         The class is designed for aligning text with intermediate processing steps in a neural network architecture.
@@ -1428,7 +1429,7 @@ class AlignTextIntermediate(nn.Module):
 
     def forward(self, hidden_states: mindspore.Tensor) -> mindspore.Tensor:
         """
-        This method constructs the intermediate representation of hidden states for aligning text in the AlignTextIntermediate class.
+        This method forwards the intermediate representation of hidden states for aligning text in the AlignTextIntermediate class.
 
         Args:
             self (AlignTextIntermediate): Instance of the AlignTextIntermediate class.
@@ -1452,7 +1453,7 @@ class AlignTextOutput(nn.Module):
 
     """
     AlignTextOutput class represents a neural network cell for aligning text output.
-    This class inherits from nn.Module and contains methods for initializing and constructing the align text output.
+    This class inherits from nn.Module and contains methods for initializing and forwarding the align text output.
 
     Attributes:
         config (object): The configuration object for the align text output.
@@ -1461,7 +1462,7 @@ class AlignTextOutput(nn.Module):
         __init__:
             Initializes the align text output cell with the given configuration.
 
-        construct:
+        forward:
             Constructs the align text output using the provided hidden states and input tensor.
 
         Args:
@@ -1499,7 +1500,7 @@ class AlignTextOutput(nn.Module):
 
     def forward(self, hidden_states: mindspore.Tensor, input_tensor: mindspore.Tensor) -> mindspore.Tensor:
         """
-        This method constructs the output tensor by performing a series of operations on the input hidden states and tensor.
+        This method forwards the output tensor by performing a series of operations on the input hidden states and tensor.
 
         Args:
             self: An instance of the AlignTextOutput class.
@@ -1531,7 +1532,7 @@ class AlignTextLayer(nn.Module):
     This class represents an AlignTextLayer for processing text sequences with attention mechanisms in a neural network model.
 
     This class inherits from nn.Module and implements methods for initializing the layer,
-    constructing the layer with attention mechanisms, and performing feed-forward chunk processing.
+    forwarding the layer with attention mechanisms, and performing feed-forward chunk processing.
 
     Attributes:
         chunk_size_feed_forward (int): The chunk size used for feed-forward processing.
@@ -1546,7 +1547,7 @@ class AlignTextLayer(nn.Module):
     Methods:
         __init__: Initializes the AlignTextLayer with configuration settings.
 
-        construct:
+        forward:
             Constructs the layer with attention mechanisms and handles cross-attention if added.
 
         feed_forward_chunk: Performs feed-forward chunk processing on the attention output.
@@ -1711,12 +1712,12 @@ class AlignTextEncoder(nn.Module):
     """
     This class represents an AlignTextEncoder that inherits from nn.Module.
 
-    The AlignTextEncoder initializes with a configuration and constructs the encoder layer with align text functionality.
+    The AlignTextEncoder initializes with a configuration and forwards the encoder layer with align text functionality.
     It supports gradient checkpointing during training and provides options to output hidden states, attentions, and cross-attentions.
     The encoder can handle various input tensors such as hidden states, attention masks, head masks, encoder hidden states,
     encoder attention masks, past key values, and caching.
 
-    The construct method processes the input tensors through the encoder layers, applying gradient checkpointing if enabled during training.
+    The forward method processes the input tensors through the encoder layers, applying gradient checkpointing if enabled during training.
     It iterates through each layer to generate hidden states and optional outputs like next decoder cache,
     all hidden states, self-attentions, and cross-attentions. The method returns the desired outputs based on the return_dict flag.
 
@@ -1760,7 +1761,7 @@ class AlignTextEncoder(nn.Module):
         return_dict: Optional[bool] = True,
     ) -> Union[Tuple[mindspore.Tensor], BaseModelOutputWithPastAndCrossAttentions]:
         """
-        This method constructs the AlignTextEncoder model.
+        This method forwards the AlignTextEncoder model.
 
         Args:
             self: The instance of the AlignTextEncoder class.
@@ -1776,7 +1777,7 @@ class AlignTextEncoder(nn.Module):
             return_dict (Optional[bool]): Optional boolean flag to return a dictionary. Defaults to True.
 
         Returns:
-            Union[Tuple[mindspore.Tensor], BaseModelOutputWithPastAndCrossAttentions]: The constructed output of the model.
+            Union[Tuple[mindspore.Tensor], BaseModelOutputWithPastAndCrossAttentions]: The forwarded output of the model.
 
         Raises:
             Warning: Raised if `use_cache=True` is incompatible with gradient checkpointing. Sets `use_cache=False` in such case.
@@ -1871,7 +1872,7 @@ class AlignTextPooler(nn.Module):
         __init__:
             Initializes the AlignTextPooler instance with the given configuration.
 
-        construct:
+        forward:
             Constructs the pooled output by aligning the input hidden states and applying pooling.
 
     """
@@ -1959,7 +1960,7 @@ class AlignTextModel(AlignPreTrainedModel):
 
     """
     The `AlignTextModel` class represents a model for aligning text.
-    It includes methods for initializing the model, getting and setting input embeddings, and constructing the model for inference.
+    It includes methods for initializing the model, getting and setting input embeddings, and forwarding the model for inference.
 
     The `__init__` method initializes the model with the provided configuration and sets up
     the embeddings, encoder, and pooler layers based on the configuration parameters.
@@ -1968,7 +1969,7 @@ class AlignTextModel(AlignPreTrainedModel):
 
     The `set_input_embeddings` method allows for setting custom word embeddings as input to the model.
 
-    The `construct` method constructs the model for inference based on the input parameters such as
+    The `forward` method forwards the model for inference based on the input parameters such as
     input tokens, attention mask, token type ids, etc.
     It returns the model outputs including the last hidden state and pooled output.
 
@@ -2084,15 +2085,15 @@ class AlignTextModel(AlignPreTrainedModel):
         batch_size, seq_length = input_shape
 
         if attention_mask is None:
-            attention_mask = ops.ones(((batch_size, seq_length)))
+            attention_mask = ops.ones(batch_size, seq_length)
 
         if token_type_ids is None:
             if hasattr(self.embeddings, "token_type_ids"):
                 buffered_token_type_ids = self.embeddings.token_type_ids[:, :seq_length]
-                buffered_token_type_ids_expanded = buffered_token_type_ids.expand(batch_size, seq_length)
+                buffered_token_type_ids_expanded = ops.broadcast_to(buffered_token_type_ids, (batch_size, seq_length))
                 token_type_ids = buffered_token_type_ids_expanded
             else:
-                token_type_ids = ops.zeros(input_shape, dtype=mindspore.int64)
+                token_type_ids = ops.zeros(*input_shape, dtype=mindspore.int64)
 
         # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
         # ourselves in which case we just need to make it broadcastable to all heads.
@@ -2143,15 +2144,15 @@ class AlignVisionModel(AlignPreTrainedModel):
     The model supports different pooling strategies for extracting features from the encoded image representations.
 
     It inherits from AlignPreTrainedModel and provides methods for initializing the model, accessing input embeddings,
-    and constructing the model output.
+    and forwarding the model output.
 
-    The model's constructor takes an AlignVisionConfig object as a parameter to configure the model's behavior.
+    The model's forwardor takes an AlignVisionConfig object as a parameter to configure the model's behavior.
     It initializes the model's components including embeddings and encoder based on the provided configuration,
     and sets up the pooling strategy based on the specified pooling type in the configuration.
 
     The 'get_input_embeddings' method returns the input embeddings generated by the model's convolutional layers for further processing.
 
-    The 'construct' method processes input pixel values to generate embeddings using the model's embeddings and encoder components.
+    The 'forward' method processes input pixel values to generate embeddings using the model's embeddings and encoder components.
     It then applies the pooling strategy to extract features from the encoded image representations.
     The method returns the last hidden state, pooled output, and additional encoder outputs based on the specified return format.
 
@@ -2209,7 +2210,7 @@ class AlignVisionModel(AlignPreTrainedModel):
         # Final pooling layer
         if config.pooling_type == "mean":
             # self.pooler = nn.AvgPool2d(config.hidden_dim, ceil_mode=True)
-            self.pooler = partial(ops.mean, axis=(2,3), keep_dims=True)
+            self.pooler = partial(ops.mean, dim=(2,3), keepdim=True)
         elif config.pooling_type == "max":
             self.pooler = nn.MaxPool2d(config.hidden_dim, ceil_mode=True)
         else:
@@ -2311,7 +2312,7 @@ class AlignModel(AlignPreTrainedModel):
         `__init__`: Initializes the `AlignModel` class.
         `get_text_features`: Computes the text embeddings.
         `get_image_features`: Computes the image embeddings.
-        `construct`: Constructs the model and computes the image-text similarity scores.
+        `forward`: Constructs the model and computes the image-text similarity scores.
 
     Please see the code examples in the docstrings of each method for usage details.
     """

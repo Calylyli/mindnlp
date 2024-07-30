@@ -28,7 +28,7 @@ def aminmax(input, *, dim=None, keepdim=False):
     return amin(input, dim, keepdim), amax(input, dim, keepdim)
 
 # all
-def all(input, dim, keepdim=False, *, dtype=None):
+def all(input, dim=None, keepdim=False, *, dtype=None):
     if USE_PYBOOST:
         return mindspore.mint.all(input, dim, keepdim)
     return ops.all(input, dim, keepdim)
@@ -40,20 +40,28 @@ def any(input, dim=None, keepdim=False):
     return ops.any(input, dim, keepdim)
 
 # max
-def max(input, dim, keepdim=False):
+def max(input, dim=None, keepdim=False):
     if USE_PYBOOST:
         return mindspore.mint.max(input, dim, keepdim)
-    return ops.max(input, dim, keepdim)
+    out = ops.max(input, dim, keepdim)
+    if dim is None:
+        return out[0]
+    return out
 
 # min
-def min(input, dim, keepdim=False):
+def min(input, dim=None, keepdim=False):
     if USE_PYBOOST:
         return mindspore.mint.min(input, dim, keepdim)
-    return ops.min(input, dim, keepdim)
+    out = ops.min(input, dim, keepdim)
+    if dim is None:
+        return out[0]
+    return out
 
 # dist
 
 # logsumexp
+def logsumexp(input, dim, keepdim=False):
+    return ops.logsumexp(input, dim, keepdim)
 
 # mean
 def mean(input, dim, keepdim=False, *, dtype=None):
@@ -79,6 +87,8 @@ def nanmedian(input, dim=-1, keepdim=False):
 
 
 # norm
+def norm(input, p='fro', dim=None, keepdim=False, dtype=None):
+    return ops.norm(input, p, dim, keepdim, dtype=dtype)
 
 # nansum
 
@@ -87,7 +97,7 @@ def nanmedian(input, dim=-1, keepdim=False):
 def prod(input, dim, keepdim=False, *, dtype=None):
     if USE_PYBOOST:
         return mindspore.mint.prod(input, dim, keepdim, dtype=dtype)
-    return ops.prod(input, dim, keepdim, dtype=dtype)
+    return ops.prod(input, dim, keepdim).to(dtype)
 
 # quantile
 def quantile(input, q, dim=None, keepdim=False, *, interpolation='linear'):
@@ -117,7 +127,7 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
     pass
 
 # unique_consecutive
-def unique_consecutive(input, return_inverse, return_counts, dim=None):
+def unique_consecutive(input, return_inverse=False, return_counts=False, dim=None):
     return ops.unique_consecutive(input, return_inverse, return_counts, dim)
 
 # var

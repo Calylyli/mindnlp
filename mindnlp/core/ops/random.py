@@ -1,13 +1,18 @@
 """random op"""
 import mindspore
 from mindspore import ops
-from mindnlp.configs import USE_PYBOOST
+from mindnlp.configs import USE_PYBOOST, DEVICE_TARGET
 from .other import cumsum, searchsorted
 from .comparison import topk
 from .pointwise import div, log
 
 # bernoulli
 def bernoulli(input):
+    if DEVICE_TARGET == 'Ascend':
+        random_numbers = rand(input.shape, dtype=input.dtype)
+        samples = random_numbers < input
+        samples = samples.int()
+        return samples
     return ops.bernoulli(input)
 
 # multinomial
@@ -45,12 +50,17 @@ def normal(mean=0.0, std=1.0, size=None):
 
 # rand
 def rand(*size, dtype=None):
+    if size[0] == []:
+        size = ()
     if USE_PYBOOST:
         return mindspore.mint.rand(*size, dtype=dtype)
     return ops.rand(*size, dtype=dtype)
 
 # rand_like
-
+def rand_like(input, *, dtype=None):
+    if USE_PYBOOST:
+        return mindspore.mint.rand_like(input, dtype=dtype)
+    return ops.rand_like(input, dtype=dtype)
 
 # randint
 def randint(low, high, size, *, dtype=None):
@@ -64,9 +74,10 @@ def ranint_like(input, low, high, *, dtype=None):
 
 # randn
 def randn(*size, dtype=None):
-    return ops.randn(*size, dtype)
+    return ops.randn(*size, dtype=dtype)
 
 # randn_like
-
+def randn_like(input, *, dtype):
+    return ops.randn_like(input, dtype=dtype)
 
 # randperm
